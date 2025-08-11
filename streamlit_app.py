@@ -45,7 +45,6 @@ def delete_votes_for_email(email: str):
     col = _get_email_col(ws)
     if not col:
         return
-    # Only delete matches in the email column
     cells = [c for c in ws.findall(email) if c.col == col]
     rows = sorted({c.row for c in cells if c.row != 1}, reverse=True)
     for r in rows:
@@ -78,6 +77,26 @@ OPTIONS = [
 
 st.set_page_config(page_title="Podcast Name Voting — Quadratic Voting", page_icon="📊")
 
+# ---- metric styling (center + larger + bold controls) ----
+st.markdown("""
+<style>
+/* center the whole metric block */
+div[data-testid="stMetric"] { text-align: center; }
+
+/* label text (e.g., "Total credits used") */
+div[data-testid="stMetricLabel"] {
+  font-size: 1.05rem;   /* change size here */
+  font-weight: 700;     /* 700=bold, 600=semibold, 400=normal */
+}
+
+/* value text (e.g., 0, 9) */
+div[data-testid="stMetricValue"] {
+  font-size: 2rem;      /* change size here */
+  font-weight: 600;     /* make value bolder/lighter */
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.title("Podcast Name Voting — Quadratic Voting")
 st.markdown("""
 ### In a quadratic voting system, each participant gets credits they can spend on votes.
@@ -98,19 +117,22 @@ Here, each participant gets **9 credits**:
 4. Don’t see a name you like? Use **Propose a different name** below, then vote on it.
 """)
 
-# ---- Email required + duplicate handling ----
+# ---- Email first (before metrics) ----
 st.subheader("Who’s voting?")
 email = st.text_input("Email address (required to submit)", key="voter_email").strip().lower()
 valid_email = bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email))
 already = email_already_voted(email) if valid_email else False
-
 allow_replace = False
 if valid_email and already:
     st.info("We already have a vote from this email. You can replace it below.")
     allow_replace = st.checkbox("Replace my previous vote with this new ballot", value=False)
-    
-# ---- TOP METRICS PLACEHOLDERS ----
-top_m1, top_m2 = st.columns(2)
+if email and not valid_email:
+    st.error("Please enter a valid email address (e.g., name@example.com).")
+
+# ---- TOP METRICS PLACEHOLDERS (centered) ----
+left, center_col, right = st.columns([1, 2, 1])
+with center_col:
+    top_m1, top_m2 = st.columns(2)
 
 # ---- helper: keep the three boxes in a row mutually exclusive (instant) ----
 def exclusify(active_key: str, row_keys: list[str]):
@@ -119,7 +141,7 @@ def exclusify(active_key: str, row_keys: list[str]):
             if k != active_key:
                 st.session_state[k] = False
 
-# Read any previously-entered "Other" name (input will be BELOW the table)
+# Read any previously-entered "Other" name (input appears BELOW the table)
 proposed_name = (st.session_state.get("proposed_name") or "").strip()
 include_other = bool(proposed_name)
 
@@ -163,7 +185,7 @@ for i, label in enumerate(rows):
     else:
         other_vote = v  # the "Other" row
 
-# --- quadratic cost + metrics (TOP)
+# --- totals + populate TOP metrics (centered placeholders)
 total_cost = sum(v*v for v in votes_dict.values()) + other_vote*other_vote
 remaining = BUDGET - total_cost
 top_m1.metric("Total credits used", total_cost)
@@ -177,7 +199,7 @@ st.text_input(
     help="Type a name and it will appear as a new row above. Then you can vote on it.",
 )
 
-# --- messages
+# --- guidance messages
 if total_cost > BUDGET:
     st.error("Over budget — uncheck something until you’re at 9 credits or less.")
 elif remaining > 0:
@@ -185,15 +207,15 @@ elif remaining > 0:
         f"You have {remaining} credit{'s' if remaining != 1 else ''} left. "
         "While you don't have to spend all your credits, it is encouraged."
     )
-if email and not valid_email:
-    st.error("Please enter a valid email address (e.g., name@example.com).")
 
-# bottom metrics (duplicate, after the 'Propose' + Email sections)
-bottom_m1, bottom_m2 = st.columns(2)
-bottom_m1.metric("Total credits used", total_cost)
-bottom_m2.metric("Credits remaining", remaining)
+# ---- bottom metrics (centered)
+left2, center_col2, right2 = st.columns([1, 2, 1])
+with center_col2:
+    b_m1, b_m2 = st.columns(2)
+    b_m1.metric("Total credits used", total_cost)
+    b_m2.metric("Credits remaining", remaining)
 
-# allow submit as long as not over budget AND email is valid AND either not duplicate or replacing
+# ---- submit gating
 disable_submit = (total_cost > BUDGET) or (not valid_email) or (already and not allow_replace)
 
 # --- submit -> Google Sheets ONLY
