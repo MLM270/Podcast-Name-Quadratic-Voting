@@ -138,43 +138,45 @@ st.set_page_config(page_title="Podcast Name Voting — Quadratic Voting", page_i
 #   3) Lets you tune sizes/spacing in ONE place
 st.markdown("""
 <style>
-/* Center metric contents and remove internal gaps */
+/* Center the metric contents */
 div[data-testid="stMetric"] { text-align: center; }
 div[data-testid="stMetric"] > div {
   display: flex;
   flex-direction: column;
-  align-items: center;          /* center children horizontally */
-  gap: 0 !important;            /* remove default spacing inside metric */
+  align-items: center;    /* center under our custom label */
+  gap: 0 !important;      /* remove internal spacing */
   margin: 0 !important;
   padding: 0 !important;
 }
-/* Hide the built-in label and delta blocks to avoid vertical/horizontal offset */
-div[data-testid="stMetric"] > div > div:first-child { display: none !important; }
+
+/* Hide Streamlit's built-in label and delta so no extra space/offset remains */
+div[data-testid="stMetricLabel"] {
+  display: none !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
 div[data-testid="stMetricDelta"] { display: none !important; }
 
-/* === TWEAKS YOU CAN EDIT ===
-   - .metric-label controls the text above each number
-   - stMetricValue controls the number itself
-*/
+/* OUR custom label above the number */
 .metric-label{
   text-align: center;
   font-size: 1.45rem;    /* ← label size */
   font-weight: 800;      /* ← 700=bold, 800=extra bold */
-  letter-spacing: 0.2px; /* ← tracking if you like */
   line-height: 1.15;     /* ← label line height */
-  margin: 6px 0 2px;     /* ← top/bottom margins around the label */
-  color: inherit;        /* ← or set a specific color, e.g., #1f2937 */
+  margin: 6px 0 2px;     /* ← vertical spacing around label */
 }
+
+/* The metric NUMBER */
 div[data-testid="stMetricValue"]{
   font-size: 2.0rem;     /* ← number size */
   font-weight: 700;      /* ← number weight */
-  line-height: 1.0;      /* ← number line height */
-  margin: 0 !important;  /* ← remove extra vertical whitespace */
+  line-height: 1.0;      /* ← tighter vertical spacing */
+  margin: 0 !important;  /* ← remove extra margin */
   text-align: center;
 }
 </style>
 """, unsafe_allow_html=True)
-
 
 def render_metric_pair(total_cost: int, remaining: int):
     """
