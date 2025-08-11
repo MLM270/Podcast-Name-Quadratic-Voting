@@ -90,44 +90,32 @@ st.set_page_config(page_title="Podcast Name Voting — Quadratic Voting", page_i
 # metric styling (center + larger labels via our own HTML + bigger numbers)
 st.markdown("""
 <style>
-/* Center metric contents */
+/* center metric contents */
 div[data-testid="stMetric"] { text-align: center; }
 
-/* Our custom label above the metric */
-.metric-label {
-  text-align: center;
-  font-size: 1.6rem;
-  font-weight: 800;
-  line-height: 1.15;
-  margin: 4px 0 2px;   /* tiny bottom gap above the number */
+/* collapse Streamlit's internal spacing + delta area */
+div[data-testid="stMetric"] > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;   /* center children */
+  gap: 0 !important;
 }
-
-/* Collapse Streamlit's built-in (empty) label + any internal spacing */
-div[data-testid="stMetric"] > div { 
-  display: flex; 
-  flex-direction: column; 
-  align-items: center;
-  gap: 0 !important;           /* kill default flex gap */
-  padding-top: 0 !important;   /* safety */
-}
-div[data-testid="stMetric"] > div > div:first-child {
-  display: none !important;    /* HIDE the built-in label entirely */
-  height: 0 !important;
+div[data-testid="stMetricDelta"] {
+  display: none !important;      /* remove delta column/space */
+  width: 0 !important;
   margin: 0 !important;
   padding: 0 !important;
-  line-height: 0 !important;
 }
 
-/* The number */
+/* your custom label */
+.metric-label { text-align:center; font-size:1.6rem; font-weight:800; margin:4px 0 2px; }
+
+/* the number */
 div[data-testid="stMetricValue"] {
-  font-size: 2rem;
-  font-weight: 700;
-  line-height: 1.0;
-  margin: 0 !important;        /* no extra vertical margin */
+  font-size: 2rem; font-weight:700; line-height:1; margin:0 !important; text-align:center;
 }
 </style>
 """, unsafe_allow_html=True)
-
 
 
 # Helper: centered metric pair with custom labels
