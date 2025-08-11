@@ -4,10 +4,10 @@
 # - Saves ballots to Google Sheets
 # - Requires an email and lets a voter replace their prior vote
 # - Radio-like checkbox grid (1 / 2 / 3 votes per row, max 1 checked)
-# - "Propose a different name" appears below the grid
+# - “Propose a different name” appears below the grid
 # - Metrics (Total credits used / Credits remaining) centered and styled
-# - Optimized: cached Google Sheets client & cached email set; only checks
-#   duplicates when the email changes
+# - Optimized: cached Google Sheets client & cached email set; duplicate
+#   check only when the email actually changes
 # ------------------------------------------------------------
 
 import re
@@ -22,7 +22,7 @@ def _get_ws_cached():
     Build and cache the Google Sheets worksheet handle for this session.
 
     Why cache? Streamlit re-runs the script on every UI interaction; caching
-    prevents re-auth + re-open on each rerun, which keeps the UI snappy.
+    prevents re-auth + re-open on each rerun, keeping the UI snappy.
     """
     import gspread
     from google.oauth2.service_account import Credentials
@@ -138,18 +138,17 @@ st.set_page_config(page_title="Podcast Name Voting — Quadratic Voting", page_i
 #   3) Lets you tune sizes/spacing in ONE place
 st.markdown("""
 <style>
-/* Center the metric contents */
+/* Center metric contents and remove internal gaps */
 div[data-testid="stMetric"] { text-align: center; }
 div[data-testid="stMetric"] > div {
   display: flex;
   flex-direction: column;
-  align-items: center;    /* center under our custom label */
-  gap: 0 !important;      /* remove internal spacing */
+  align-items: center;          /* center children horizontally */
+  gap: 0 !important;            /* remove default spacing inside metric */
   margin: 0 !important;
   padding: 0 !important;
 }
-
-/* Hide Streamlit's built-in label and delta so no extra space/offset remains */
+/* Hide the built-in label and delta blocks so no extra space remains */
 div[data-testid="stMetricLabel"] {
   display: none !important;
   height: 0 !important;
@@ -158,19 +157,22 @@ div[data-testid="stMetricLabel"] {
 }
 div[data-testid="stMetricDelta"] { display: none !important; }
 
-/* OUR custom label above the number */
+/* === TWEAKS YOU CAN EDIT ===
+   - .metric-label controls the text above each number
+   - stMetricValue controls the number itself
+*/
 .metric-label{
   text-align: center;
   font-size: 1.45rem;    /* ← label size */
-  font-weight: 300;      /* ← 700=bold, 800=extra bold */
-  line-height: 1.0;     /* ← label line height */
-  margin: 0px 0 0px;     /* ← vertical spacing around label */
+  font-weight: 800;      /* ← 700=bold, 800=extra bold */
+  letter-spacing: 0.2px; /* ← tracking if you like */
+  line-height: 1.15;     /* ← label line height */
+  margin: 6px 0 2px;     /* ← vertical spacing around label */
+  color: inherit;        /* ← or set a specific color, e.g., #1f2937 */
 }
-
-/* The metric NUMBER */
 div[data-testid="stMetricValue"]{
-  font-size: 1.8rem;     /* ← number size */
-  font-weight: 600;      /* ← number weight */
+  font-size: 2.0rem;     /* ← number size */
+  font-weight: 700;      /* ← number weight */
   line-height: 1.0;      /* ← tighter vertical spacing */
   margin: 0 !important;  /* ← remove extra margin */
   text-align: center;
@@ -219,9 +221,13 @@ Here, each participant gets **9 credits**:
 
 # ============================== Email (first) ==============================
 
+# Simple, robust email validator (case-insensitive)
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", re.IGNORECASE)
+
 st.subheader("Who’s voting?")
-email = st.text_input("Email address (required to submit)", key="voter_email").strip().lower()
-valid_email = bool(re.match(r"^[^@\s]+@[^@\s]+\\.[^@\\s]+$", email))
+raw_email = st.text_input("Email address (required to submit)", key="voter_email").strip()
+valid_email = bool(EMAIL_RE.match(raw_email))
+email = raw_email.lower()  # normalize for duplicate checks
 
 # Only check duplicates when the email changes (avoids API calls on every rerun)
 already = False
@@ -235,7 +241,7 @@ allow_replace = False
 if valid_email and already:
     st.info("We already have a vote from this email. You can replace it below.")
     allow_replace = st.checkbox("Replace my previous vote with this new ballot", value=False)
-if email and not valid_email:
+if raw_email and not valid_email:
     st.error("Please enter a valid email address (e.g., name@example.com).")
 
 # Reserve a visual spot for the TOP metrics; we'll fill it after computing totals.
