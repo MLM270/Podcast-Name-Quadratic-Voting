@@ -85,9 +85,23 @@ st.set_page_config(page_title="Podcast Name Voting — Quadratic Voting", page_i
 # ---- metric styling (center + larger + bold controls) ----
 st.markdown("""
 <style>
+/* center the metric contents */
 div[data-testid="stMetric"] { text-align: center; }
-div[data-testid="stMetricLabel"] { font-size: 1.05rem; font-weight: 700; }
-div[data-testid="stMetricValue"] { font-size: 2rem; font-weight: 600; }
+
+/* our custom label (above the metric) */
+.metric-label {
+  text-align: center;
+  font-size: 1.35rem;   /* <— bump label size here */
+  font-weight: 700;     /* 700=bold, 800=extra bold */
+  line-height: 1.2;
+  margin-bottom: 0.15rem;
+}
+
+/* metric number */
+div[data-testid="stMetricValue"] {
+  font-size: 2rem;      /* <— you said you like this size; change if needed */
+  font-weight: 600;
+}
 </style>
 """, unsafe_allow_html=True)
 
