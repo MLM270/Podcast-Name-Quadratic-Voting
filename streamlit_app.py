@@ -164,15 +164,15 @@ div[data-testid="stMetricDelta"] { display: none !important; }
 .metric-label{
   text-align: center;
   font-size: 1.45rem;    /* ← label size */
-  font-weight: 800;      /* ← 700=bold, 800=extra bold */
-  letter-spacing: 0.2px; /* ← tracking if you like */
-  line-height: 1.15;     /* ← label line height */
-  margin: 6px 0 2px;     /* ← vertical spacing around label */
+  font-weight: 300;      /* ← 700=bold, 800=extra bold */
+  letter-spacing: 0.1px; /* ← tracking if you like */
+  line-height: 1.0;     /* ← label line height */
+  margin: 0px 0 0px;     /* ← vertical spacing around label */
   color: inherit;        /* ← or set a specific color, e.g., #1f2937 */
 }
 div[data-testid="stMetricValue"]{
   font-size: 2.0rem;     /* ← number size */
-  font-weight: 700;      /* ← number weight */
+  font-weight: 600;      /* ← number weight */
   line-height: 1.0;      /* ← tighter vertical spacing */
   margin: 0 !important;  /* ← remove extra margin */
   text-align: center;
