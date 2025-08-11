@@ -48,14 +48,22 @@ st.set_page_config(page_title="Podcast Name Voting — Quadratic Voting", page_i
 
 st.title("Podcast Name Voting — Quadratic Voting")
 st.markdown("""
-In this voting system, each participant gets **9 credits** to spend however they choose.
+### In a quadratic voting system, each participant gets credits they can spend on votes.
+### **The stronger your support, the more credits it costs.**
 
-- Casting **1 vote** for an option costs 1² = 1 credit.
-- Casting **2 votes** for the same option costs 2² = 4 credits.
-- Casting **3 votes** for the same option costs 3² = 9 credits.
+This system can be more effective at finding a **collective consensus** while still letting each voter emphasize their choices.
 
-This means the more strongly you support an option, the more it costs to express that intensity. 
-The goal is to find a **collective consensus** while letting each of us emphasize our choices.
+Here, each participant gets **9 credits** to spend in many different ways:
+
+- **1 vote** for an option costs **1² = 1** credit  
+- **2 votes** for the same option cost **2² = 4** credits  
+- **3 votes** for the same option cost **3² = 9** credits
+
+**How to vote here**
+1. Pick **one box per row** (or leave a row blank).  
+2. Spend **up to 9 credits** total — the counter shows what you’ve used and what’s left.  
+3. You **can** submit with unused credits, but spending all 9 is encouraged.  
+4. Don’t see a name you like? Use **Propose a different name** below, then vote on it.
 """)
 
 # ---- TOP METRICS PLACEHOLDERS ----
@@ -68,13 +76,7 @@ def exclusify(active_key: str, row_keys: list[str]):
             if k != active_key:
                 st.session_state[k] = False
 
-# --- "Other" input BELOW the table; adds a row on rerun if non-empty
-st.subheader("Propose a different name (optional)")
-st.text_input(
-    "Don't see a name you'd like to add, put it here:",
-    key="proposed_name",
-    help="Type a name and it will appear as a new row in the table above.",
-)
+# Read any previously-entered "Other" name (we’ll render the input BELOW the table)
 proposed_name = (st.session_state.get("proposed_name") or "").strip()
 include_other = bool(proposed_name)
 
@@ -118,17 +120,19 @@ for i, label in enumerate(rows):
     else:
         other_vote = v  # the "Other" row
 
-# --- quadratic cost + metrics
+# --- quadratic cost + metrics (TOP)
 total_cost = sum(v*v for v in votes_dict.values()) + other_vote*other_vote
 remaining = BUDGET - total_cost
-
-top_m1.metric("Total cost used", total_cost)
+top_m1.metric("Total credits used", total_cost)
 top_m2.metric("Credits remaining", remaining)
 
-# bottom metrics (duplicate)
-bottom_m1, bottom_m2 = st.columns(2)
-bottom_m1.metric("Total cost used", total_cost)
-bottom_m2.metric("Credits remaining", remaining)
+# ---- Propose a different name (now BELOW the table, before bottom metrics) ----
+st.subheader("Propose a different name (optional)")
+st.text_input(
+    "Don't see a name you'd like to add? Put it here:",
+    key="proposed_name",
+    help="Type a name and it will appear as a new row above. Then you can vote on it.",
+)
 
 # --- messages
 if total_cost > BUDGET:
@@ -138,6 +142,11 @@ elif remaining > 0:
         f"You have {remaining} credit{'s' if remaining != 1 else ''} left. "
         "While you don't have to spend all your credits, it is encouraged."
     )
+
+# bottom metrics (duplicate, after the 'Propose' box)
+bottom_m1, bottom_m2 = st.columns(2)
+bottom_m1.metric("Total credits used", total_cost)
+bottom_m2.metric("Credits remaining", remaining)
 
 # allow submit as long as not over budget
 disable_submit = (total_cost > BUDGET)
