@@ -1,4 +1,5 @@
 # streamlit_app.py
+import re
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -18,6 +19,37 @@ def _get_ws():
     sh = gc.open_by_key(secrets["sheet_id"])
     ws = sh.worksheet(secrets.get("worksheet_name", "Responses"))
     return ws
+
+def _get_email_col(ws):
+    headers = ws.row_values(1)
+    try:
+        return headers.index("email") + 1  # 1-based
+    except ValueError:
+        return None
+
+def email_already_voted(email: str) -> bool:
+    if not email:
+        return False
+    ws = _get_ws()
+    col = _get_email_col(ws)
+    if not col:
+        return False
+    existing = [e.strip().lower() for e in ws.col_values(col)[1:]]  # skip header
+    return email.strip().lower() in set(existing)
+
+def delete_votes_for_email(email: str):
+    """Delete any existing rows for this email (safe for small sheets)."""
+    if not email:
+        return
+    ws = _get_ws()
+    col = _get_email_col(ws)
+    if not col:
+        return
+    # Only delete matches in the email column
+    cells = [c for c in ws.findall(email) if c.col == col]
+    rows = sorted({c.row for c in cells if c.row != 1}, reverse=True)
+    for r in rows:
+        ws.delete_rows(r)
 
 def save_vote_to_gsheet(row_dict: dict):
     ws = _get_ws()
@@ -53,7 +85,7 @@ st.markdown("""
 
 This system can be more effective at finding a **collective consensus** while still letting each voter emphasize their choices.
 
-Here, each participant gets **9 credits** to spend in many different ways:
+Here, each participant gets **9 credits**:
 
 - **1 vote** for an option costs **1² = 1** credit  
 - **2 votes** for the same option cost **2² = 4** credits  
@@ -66,6 +98,17 @@ Here, each participant gets **9 credits** to spend in many different ways:
 4. Don’t see a name you like? Use **Propose a different name** below, then vote on it.
 """)
 
+# ---- Email required + duplicate handling ----
+st.subheader("Who’s voting?")
+email = st.text_input("Email address (required to submit)", key="voter_email").strip().lower()
+valid_email = bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email))
+already = email_already_voted(email) if valid_email else False
+
+allow_replace = False
+if valid_email and already:
+    st.info("We already have a vote from this email. You can replace it below.")
+    allow_replace = st.checkbox("Replace my previous vote with this new ballot", value=False)
+    
 # ---- TOP METRICS PLACEHOLDERS ----
 top_m1, top_m2 = st.columns(2)
 
@@ -76,7 +119,7 @@ def exclusify(active_key: str, row_keys: list[str]):
             if k != active_key:
                 st.session_state[k] = False
 
-# Read any previously-entered "Other" name (we’ll render the input BELOW the table)
+# Read any previously-entered "Other" name (input will be BELOW the table)
 proposed_name = (st.session_state.get("proposed_name") or "").strip()
 include_other = bool(proposed_name)
 
@@ -126,7 +169,7 @@ remaining = BUDGET - total_cost
 top_m1.metric("Total credits used", total_cost)
 top_m2.metric("Credits remaining", remaining)
 
-# ---- Propose a different name (now BELOW the table, before bottom metrics) ----
+# ---- Propose a different name (BELOW table, before bottom metrics) ----
 st.subheader("Propose a different name (optional)")
 st.text_input(
     "Don't see a name you'd like to add? Put it here:",
@@ -142,19 +185,25 @@ elif remaining > 0:
         f"You have {remaining} credit{'s' if remaining != 1 else ''} left. "
         "While you don't have to spend all your credits, it is encouraged."
     )
+if email and not valid_email:
+    st.error("Please enter a valid email address (e.g., name@example.com).")
 
-# bottom metrics (duplicate, after the 'Propose' box)
+# bottom metrics (duplicate, after the 'Propose' + Email sections)
 bottom_m1, bottom_m2 = st.columns(2)
 bottom_m1.metric("Total credits used", total_cost)
 bottom_m2.metric("Credits remaining", remaining)
 
-# allow submit as long as not over budget
-disable_submit = (total_cost > BUDGET)
+# allow submit as long as not over budget AND email is valid AND either not duplicate or replacing
+disable_submit = (total_cost > BUDGET) or (not valid_email) or (already and not allow_replace)
 
 # --- submit -> Google Sheets ONLY
 if st.button("Submit", disabled=disable_submit, type="primary"):
+    if already and allow_replace:
+        delete_votes_for_email(email)
+
     row_out = {
         "timestamp_utc": datetime.utcnow().isoformat(),
+        "email": email,
         "total_cost": total_cost,
         **votes_dict,
         "Other (text)": proposed_name if include_other else "",
