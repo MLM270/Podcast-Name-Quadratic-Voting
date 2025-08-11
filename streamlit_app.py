@@ -56,8 +56,6 @@ In this voting system, each participant gets **9 credits** to spend however they
 
 This means the more strongly you support an option, the more it costs to express that intensity. 
 The goal is to find a **collective consensus** while letting each of us emphasize our choices.
-
-Check **one** box per row (or leave a row blank). You can submit with **up to 9** credits.
 """)
 
 # ---- TOP METRICS PLACEHOLDERS ----
