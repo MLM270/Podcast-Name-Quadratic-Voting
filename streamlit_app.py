@@ -3,6 +3,30 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
+# ---------- Google Sheets helpers ----------
+def _get_ws():
+    import gspread
+    from google.oauth2.service_account import Credentials
+
+    scope = ["https://www.googleapis.com/auth/spreadsheets"]
+    secrets = st.secrets  # expects: sheet_id, worksheet_name, [gcp_service_account]
+    creds = Credentials.from_service_account_info(secrets["gcp_service_account"], scopes=scope)
+    gc = gspread.authorize(creds)
+    sh = gc.open_by_key(secrets["sheet_id"])
+    ws = sh.worksheet(secrets.get("worksheet_name", "Responses"))
+    return ws
+
+def save_vote_to_gsheet(row_dict: dict):
+    ws = _get_ws()
+    # Ensure header row exists (create once in a stable column order)
+    headers = ws.row_values(1)
+    if not headers:
+        ws.append_row(list(row_dict.keys()))
+        headers = ws.row_values(1)
+    # Append values in header order so columns stay aligned even if code changes
+    ws.append_row([row_dict.get(h, "") for h in headers])
+
+# ---------- App ----------
 BUDGET = 9
 OPTIONS = [
     "How Did We Get Here?",
@@ -37,7 +61,6 @@ Check **one** box per row (or leave a row blank). You can submit with **up to 9*
 
 # ---- TOP METRICS PLACEHOLDERS (we'll fill after computing totals) ----
 top_m1, top_m2 = st.columns(2)
-# (do not call .metric yet; we'll update after we compute totals)
 
 # --- read any previously-entered "Other" name from session state
 proposed_name = st.session_state.get("proposed_name", "").strip()
@@ -46,11 +69,7 @@ include_other = bool(proposed_name)
 # --- build the editable table (grid)
 index = OPTIONS + ([proposed_name] if include_other else [])
 df = pd.DataFrame(
-    {
-        "1 vote": [False] * len(index),
-        "2 votes": [False] * len(index),
-        "3 votes": [False] * len(index),
-    },
+    {"1 vote": [False]*len(index), "2 votes": [False]*len(index), "3 votes": [False]*len(index)},
     index=index,
 )
 df.index.name = "Name options"
@@ -81,12 +100,9 @@ invalid_rows = row_counts[row_counts > 1].index.tolist()
 
 # --- convert selections to 0/1/2/3 votes
 def row_to_votes(row):
-    if row["1 vote"]:
-        return 1
-    if row["2 votes"]:
-        return 2
-    if row["3 votes"]:
-        return 3
+    if row["1 vote"]: return 1
+    if row["2 votes"]: return 2
+    if row["3 votes"]: return 3
     return 0
 
 votes_series = edited.apply(row_to_votes, axis=1)
@@ -96,14 +112,14 @@ votes_dict = {opt: int(votes_series.get(opt, 0)) for opt in OPTIONS}
 v_other = int(votes_series.get(proposed_name, 0)) if include_other else 0
 
 # --- quadratic cost + metrics
-total_cost = sum(v * v for v in votes_dict.values()) + v_other * v_other
+total_cost = sum(v*v for v in votes_dict.values()) + v_other*v_other
 remaining = BUDGET - total_cost
 
-# NOW populate the TOP metrics (created earlier)
+# populate the TOP metrics
 top_m1.metric("Total cost used", total_cost)
 top_m2.metric("Credits remaining", remaining)
 
-# Also show BOTTOM metrics (duplicate)
+# also show BOTTOM metrics (duplicate)
 bottom_m1, bottom_m2 = st.columns(2)
 bottom_m1.metric("Total cost used", total_cost)
 bottom_m2.metric("Credits remaining", remaining)
@@ -122,7 +138,7 @@ elif remaining > 0:
 # allow submit as long as rows are valid and not over budget
 disable_submit = bool(invalid_rows) or (total_cost > BUDGET)
 
-# --- submit
+# --- submit -> Google Sheets ONLY
 if st.button("Submit", disabled=disable_submit, type="primary"):
     row_out = {
         "timestamp_utc": datetime.utcnow().isoformat(),
@@ -131,9 +147,6 @@ if st.button("Submit", disabled=disable_submit, type="primary"):
         "Other (text)": proposed_name if include_other else "",
         "Other (votes)": v_other,
     }
-    try:
-        pd.DataFrame([row_out]).to_csv("votes.csv", mode="a", header=False, index=False)
-    except FileNotFoundError:
-        pd.DataFrame([row_out]).to_csv("votes.csv", mode="w", header=True, index=False)
-    st.success("Thanks! Your vote was recorded.")
+    save_vote_to_gsheet(row_out)
+    st.success("Thanks! Your vote was recorded in Google Sheets.")
     st.balloons()
