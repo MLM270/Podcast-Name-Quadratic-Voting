@@ -1,10 +1,10 @@
 # streamlit_app.py
 import re
 import streamlit as st
-import pandas as pd
+import pandas as pd  # (kept in case you add results views later)
 from datetime import datetime
 
-# ---------- Google Sheets helpers (CACHED) ----------
+# =============== Google Sheets helpers (CACHED) ===============
 @st.cache_resource
 def _get_ws_cached():
     """Create and cache the Google Sheets worksheet handle for this session."""
@@ -19,10 +19,15 @@ def _get_ws_cached():
     creds = Credentials.from_service_account_info(secrets["gcp_service_account"], scopes=scopes)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(secrets["sheet_id"])
-    ws = sh.worksheet(secrets.get("worksheet_name", "Responses"))
+    ws_name = secrets.get("worksheet_name", "Responses")
+    try:
+        ws = sh.worksheet(ws_name)
+    except gspread.exceptions.WorksheetNotFound:
+        # Create if missing
+        ws = sh.add_worksheet(title=ws_name, rows=1000, cols=100)
     return ws
 
-@st.cache_data(ttl=120)  # refresh email list at most every 120s
+@st.cache_data(ttl=120)  # refresh email list at most every 120 seconds
 def _get_email_set():
     """Return a set of all emails (lowercased) currently in the sheet."""
     ws = _get_ws_cached()
@@ -63,7 +68,7 @@ def save_vote_to_gsheet(row_dict: dict):
         headers = ws.row_values(1)
     ws.append_row([row_dict.get(h, "") for h in headers])
 
-# ---------- App ----------
+# =============== App config & styles ===============
 BUDGET = 9
 OPTIONS = [
     "How Did We Get Here?",
@@ -82,29 +87,62 @@ OPTIONS = [
 
 st.set_page_config(page_title="Podcast Name Voting — Quadratic Voting", page_icon="📊")
 
-# ---- metric styling (center + larger + bold controls) ----
+# metric styling (center + larger labels via our own HTML + bigger numbers)
 st.markdown("""
 <style>
-/* center the metric contents */
+/* Center metric contents */
 div[data-testid="stMetric"] { text-align: center; }
 
-/* our custom label (above the metric) */
+/* Our custom label above the metric */
 .metric-label {
   text-align: center;
-  font-size: 1.35rem;   /* <— bump label size here */
-  font-weight: 700;     /* 700=bold, 800=extra bold */
-  line-height: 1.2;
-  margin-bottom: 0.15rem;
+  font-size: 1.6rem;
+  font-weight: 800;
+  line-height: 1.15;
+  margin: 4px 0 2px;   /* tiny bottom gap above the number */
 }
 
-/* metric number */
+/* Collapse Streamlit's built-in (empty) label + any internal spacing */
+div[data-testid="stMetric"] > div { 
+  display: flex; 
+  flex-direction: column; 
+  align-items: center;
+  gap: 0 !important;           /* kill default flex gap */
+  padding-top: 0 !important;   /* safety */
+}
+div[data-testid="stMetric"] > div > div:first-child {
+  display: none !important;    /* HIDE the built-in label entirely */
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 0 !important;
+}
+
+/* The number */
 div[data-testid="stMetricValue"] {
-  font-size: 2rem;      /* <— you said you like this size; change if needed */
-  font-weight: 600;
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.0;
+  margin: 0 !important;        /* no extra vertical margin */
 }
 </style>
 """, unsafe_allow_html=True)
 
+
+
+# Helper: centered metric pair with custom labels
+def render_metric_pair(total_cost: int, remaining: int):
+    left, center_col, right = st.columns([1, 2, 1])
+    with center_col:
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown('<div class="metric-label">Total credits used</div>', unsafe_allow_html=True)
+            st.metric(label="", value=total_cost)
+        with c2:
+            st.markdown('<div class="metric-label">Credits remaining</div>', unsafe_allow_html=True)
+            st.metric(label="", value=remaining)
+
+# =============== Header & Instructions ===============
 st.title("Podcast Name Voting — Quadratic Voting")
 st.markdown("""
 ### In a quadratic voting system, each participant gets credits they can spend on votes.
@@ -125,12 +163,12 @@ Here, each participant gets **9 credits**:
 4. Don’t see a name you like? Use **Propose a different name** below, then vote on it.
 """)
 
-# ---- Email first (before metrics) ----
+# =============== Email (first) ===============
 st.subheader("Who’s voting?")
 email = st.text_input("Email address (required to submit)", key="voter_email").strip().lower()
 valid_email = bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email))
 
-# Check for prior vote **only when the email changes**, using cached set to avoid API spam
+# Duplicate check only when email changes (uses cached email set)
 already = False
 if valid_email:
     if email != st.session_state.get("last_checked_email"):
@@ -145,30 +183,28 @@ if valid_email and already:
 if email and not valid_email:
     st.error("Please enter a valid email address (e.g., name@example.com).")
 
-# ---- TOP METRICS PLACEHOLDERS (centered) ----
-left, center_col, right = st.columns([1, 2, 1])
-with center_col:
-    top_m1, top_m2 = st.columns(2)
+# Reserve visual spot for top metrics (we will fill after computing totals)
+top_metrics = st.container()
 
-# ---- helper: keep the three boxes in a row mutually exclusive (instant) ----
-def exclusify(active_key: str, row_keys: list[str]):
+# =============== Voting grid (radio-like checkboxes) ===============
+def exclusify(active_key, row_keys):
+    """Ensure only one checkbox per row is selected."""
     if st.session_state.get(active_key, False):
         for k in row_keys:
             if k != active_key:
                 st.session_state[k] = False
 
-# Read any previously-entered "Other" name (input appears BELOW the table)
+# Optional "Other" name (input lives below table; we read it here to add row if present)
 proposed_name = (st.session_state.get("proposed_name") or "").strip()
 include_other = bool(proposed_name)
 
-# ---- header row for the grid ----
+# Header row
 h0, h1, h2, h3 = st.columns([3, 1, 1, 1])
 h0.markdown("**Name options**")
 h1.markdown("**1 vote**")
 h2.markdown("**2 votes**")
 h3.markdown("**3 votes**")
 
-# ---- draw grid rows with exclusive checkboxes ----
 votes_dict = {}
 rows = OPTIONS + ([proposed_name] if include_other else [])
 other_vote = 0
@@ -177,7 +213,7 @@ for i, label in enumerate(rows):
     c0, c1, c2, c3 = st.columns([3, 1, 1, 1])
     c0.write(label if label else "Other")
 
-    # stable keys per row, unrelated to label text
+    # Stable keys per row
     k1 = f"row{i}_v1"
     k2 = f"row{i}_v2"
     k3 = f"row{i}_v3"
@@ -201,13 +237,15 @@ for i, label in enumerate(rows):
     else:
         other_vote = v  # the "Other" row
 
-# --- totals + populate TOP metrics (centered placeholders)
+# =============== Totals + metrics ===============
 total_cost = sum(v*v for v in votes_dict.values()) + other_vote*other_vote
 remaining = BUDGET - total_cost
-top_m1.metric("Total credits used", total_cost)
-top_m2.metric("Credits remaining", remaining)
 
-# ---- Propose a different name (BELOW table, before bottom metrics) ----
+# Fill the top metrics placeholder now that totals exist
+with top_metrics:
+    render_metric_pair(total_cost, remaining)
+
+# =============== Propose a different name (below table) ===============
 st.subheader("Propose a different name (optional)")
 st.text_input(
     "Don't see a name you'd like to add? Put it here:",
@@ -215,7 +253,10 @@ st.text_input(
     help="Type a name and it will appear as a new row above. Then you can vote on it.",
 )
 
-# --- guidance messages
+# Bottom metrics
+render_metric_pair(total_cost, remaining)
+
+# Guidance
 if total_cost > BUDGET:
     st.error("Over budget — uncheck something until you’re at 9 credits or less.")
 elif remaining > 0:
@@ -224,17 +265,9 @@ elif remaining > 0:
         "While you don't have to spend all your credits, it is encouraged."
     )
 
-# ---- bottom metrics (centered)
-left2, center_col2, right2 = st.columns([1, 2, 1])
-with center_col2:
-    b_m1, b_m2 = st.columns(2)
-    b_m1.metric("Total credits used", total_cost)
-    b_m2.metric("Credits remaining", remaining)
-
-# ---- submit gating
+# =============== Submit gating & Save ===============
 disable_submit = (total_cost > BUDGET) or (not valid_email) or (already and not allow_replace)
 
-# --- submit -> Google Sheets ONLY
 if st.button("Submit", disabled=disable_submit, type="primary"):
     if already and allow_replace:
         delete_votes_for_email(email)
