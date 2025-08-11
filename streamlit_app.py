@@ -4,8 +4,10 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-# ---------- Google Sheets helpers ----------
-def _get_ws():
+# ---------- Google Sheets helpers (CACHED) ----------
+@st.cache_resource
+def _get_ws_cached():
+    """Create and cache the Google Sheets worksheet handle for this session."""
     import gspread
     from google.oauth2.service_account import Credentials
 
@@ -20,38 +22,41 @@ def _get_ws():
     ws = sh.worksheet(secrets.get("worksheet_name", "Responses"))
     return ws
 
-def _get_email_col(ws):
+@st.cache_data(ttl=120)  # refresh email list at most every 120s
+def _get_email_set():
+    """Return a set of all emails (lowercased) currently in the sheet."""
+    ws = _get_ws_cached()
     headers = ws.row_values(1)
     try:
-        return headers.index("email") + 1  # 1-based
+        col_idx = headers.index("email") + 1  # 1-based
     except ValueError:
-        return None
+        return set()
+    # skip header; lower + strip
+    return {e.strip().lower() for e in ws.col_values(col_idx)[1:]}
 
 def email_already_voted(email: str) -> bool:
     if not email:
         return False
-    ws = _get_ws()
-    col = _get_email_col(ws)
-    if not col:
-        return False
-    existing = [e.strip().lower() for e in ws.col_values(col)[1:]]  # skip header
-    return email.strip().lower() in set(existing)
+    return email.strip().lower() in _get_email_set()
 
 def delete_votes_for_email(email: str):
     """Delete any existing rows for this email (safe for small sheets)."""
     if not email:
         return
-    ws = _get_ws()
-    col = _get_email_col(ws)
-    if not col:
+    ws = _get_ws_cached()
+    headers = ws.row_values(1)
+    try:
+        col_idx = headers.index("email") + 1
+    except ValueError:
         return
-    cells = [c for c in ws.findall(email) if c.col == col]
+    # Only match in the email column
+    cells = [c for c in ws.findall(email) if c.col == col_idx]
     rows = sorted({c.row for c in cells if c.row != 1}, reverse=True)
     for r in rows:
         ws.delete_rows(r)
 
 def save_vote_to_gsheet(row_dict: dict):
-    ws = _get_ws()
+    ws = _get_ws_cached()
     headers = ws.row_values(1)
     if not headers:
         ws.append_row(list(row_dict.keys()))
@@ -80,20 +85,9 @@ st.set_page_config(page_title="Podcast Name Voting — Quadratic Voting", page_i
 # ---- metric styling (center + larger + bold controls) ----
 st.markdown("""
 <style>
-/* center the whole metric block */
 div[data-testid="stMetric"] { text-align: center; }
-
-/* label text (e.g., "Total credits used") */
-div[data-testid="stMetricLabel"] {
-  font-size: 1.05rem;   /* change size here */
-  font-weight: 700;     /* 700=bold, 600=semibold, 400=normal */
-}
-
-/* value text (e.g., 0, 9) */
-div[data-testid="stMetricValue"] {
-  font-size: 2rem;      /* change size here */
-  font-weight: 600;     /* make value bolder/lighter */
-}
+div[data-testid="stMetricLabel"] { font-size: 1.05rem; font-weight: 700; }
+div[data-testid="stMetricValue"] { font-size: 2rem; font-weight: 600; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -121,7 +115,15 @@ Here, each participant gets **9 credits**:
 st.subheader("Who’s voting?")
 email = st.text_input("Email address (required to submit)", key="voter_email").strip().lower()
 valid_email = bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email))
-already = email_already_voted(email) if valid_email else False
+
+# Check for prior vote **only when the email changes**, using cached set to avoid API spam
+already = False
+if valid_email:
+    if email != st.session_state.get("last_checked_email"):
+        st.session_state["last_checked_email"] = email
+        st.session_state["email_exists"] = email_already_voted(email)
+    already = st.session_state.get("email_exists", False)
+
 allow_replace = False
 if valid_email and already:
     st.info("We already have a vote from this email. You can replace it below.")
@@ -232,5 +234,9 @@ if st.button("Submit", disabled=disable_submit, type="primary"):
         "Other (votes)": other_vote,
     }
     save_vote_to_gsheet(row_out)
+
+    # Invalidate cached email set so subsequent checks reflect this submission immediately
+    _get_email_set.clear()
+
     st.success("Thanks! Your vote was recorded in Google Sheets.")
     st.balloons()
