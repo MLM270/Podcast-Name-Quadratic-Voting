@@ -8,9 +8,12 @@ def _get_ws():
     import gspread
     from google.oauth2.service_account import Credentials
 
-    scope = ["https://www.googleapis.com/auth/spreadsheets"]
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",  # helpful for Shared Drives
+    ]
     secrets = st.secrets  # expects: sheet_id, worksheet_name, [gcp_service_account]
-    creds = Credentials.from_service_account_info(secrets["gcp_service_account"], scopes=scope)
+    creds = Credentials.from_service_account_info(secrets["gcp_service_account"], scopes=scopes)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(secrets["sheet_id"])
     ws = sh.worksheet(secrets.get("worksheet_name", "Responses"))
@@ -18,12 +21,10 @@ def _get_ws():
 
 def save_vote_to_gsheet(row_dict: dict):
     ws = _get_ws()
-    # Ensure header row exists (create once in a stable column order)
     headers = ws.row_values(1)
     if not headers:
         ws.append_row(list(row_dict.keys()))
         headers = ws.row_values(1)
-    # Append values in header order so columns stay aligned even if code changes
     ws.append_row([row_dict.get(h, "") for h in headers])
 
 # ---------- App ----------
@@ -59,32 +60,15 @@ The goal is to find a **collective consensus** while letting each of us *emphasi
 Check **one** box per row (or leave a row blank). You can submit with **up to 9** credits.
 """)
 
-# ---- TOP METRICS PLACEHOLDERS (we'll fill after computing totals) ----
+# ---- TOP METRICS PLACEHOLDERS ----
 top_m1, top_m2 = st.columns(2)
 
-# --- read any previously-entered "Other" name from session state
-proposed_name = st.session_state.get("proposed_name", "").strip()
-include_other = bool(proposed_name)
-
-# --- build the editable table (grid)
-index = OPTIONS + ([proposed_name] if include_other else [])
-df = pd.DataFrame(
-    {"1 vote": [False]*len(index), "2 votes": [False]*len(index), "3 votes": [False]*len(index)},
-    index=index,
-)
-df.index.name = "Name options"
-
-edited = st.data_editor(
-    df,
-    num_rows="fixed",
-    use_container_width=True,
-    hide_index=False,
-    column_config={
-        "1 vote": st.column_config.CheckboxColumn(help="Costs 1 credit"),
-        "2 votes": st.column_config.CheckboxColumn(help="Costs 4 credits"),
-        "3 votes": st.column_config.CheckboxColumn(help="Costs 9 credits"),
-    },
-)
+# ---- helper: keep the three boxes in a row mutually exclusive (instant) ----
+def exclusify(active_key: str, row_keys: list[str]):
+    if st.session_state.get(active_key, False):
+        for k in row_keys:
+            if k != active_key:
+                st.session_state[k] = False
 
 # --- "Other" input BELOW the table; adds a row on rerun if non-empty
 st.subheader("Propose a different name (optional)")
@@ -93,40 +77,62 @@ st.text_input(
     key="proposed_name",
     help="Type a name and it will appear as a new row in the table above.",
 )
+proposed_name = (st.session_state.get("proposed_name") or "").strip()
+include_other = bool(proposed_name)
 
-# --- validate: only one checkbox per row
-row_counts = edited[["1 vote", "2 votes", "3 votes"]].sum(axis=1)
-invalid_rows = row_counts[row_counts > 1].index.tolist()
+# ---- header row for the grid ----
+h0, h1, h2, h3 = st.columns([3, 1, 1, 1])
+h0.markdown("**Name options**")
+h1.markdown("**1 vote**")
+h2.markdown("**2 votes**")
+h3.markdown("**3 votes**")
 
-# --- convert selections to 0/1/2/3 votes
-def row_to_votes(row):
-    if row["1 vote"]: return 1
-    if row["2 votes"]: return 2
-    if row["3 votes"]: return 3
-    return 0
+# ---- draw grid rows with exclusive checkboxes ----
+votes_dict = {}
+rows = OPTIONS + ([proposed_name] if include_other else [])
+other_vote = 0
 
-votes_series = edited.apply(row_to_votes, axis=1)
+for i, label in enumerate(rows):
+    c0, c1, c2, c3 = st.columns([3, 1, 1, 1])
+    c0.write(label if label else "Other")
 
-# split into predefined + optional Other
-votes_dict = {opt: int(votes_series.get(opt, 0)) for opt in OPTIONS}
-v_other = int(votes_series.get(proposed_name, 0)) if include_other else 0
+    # stable keys per row, unrelated to label text
+    k1 = f"row{i}_v1"
+    k2 = f"row{i}_v2"
+    k3 = f"row{i}_v3"
+    row_keys = [k1, k2, k3]
+
+    # If this is the "Other" row but no text entered yet, disable & clear
+    disabled = (i == len(OPTIONS) and not include_other)
+    if disabled:
+        for k in row_keys:
+            st.session_state[k] = False
+
+    c1.checkbox("", key=k1, on_change=exclusify, args=(k1, row_keys), disabled=disabled)
+    c2.checkbox("", key=k2, on_change=exclusify, args=(k2, row_keys), disabled=disabled)
+    c3.checkbox("", key=k3, on_change=exclusify, args=(k3, row_keys), disabled=disabled)
+
+    # translate to 0/1/2/3 votes instantly
+    v = 3 if st.session_state.get(k3) else 2 if st.session_state.get(k2) else 1 if st.session_state.get(k1) else 0
+
+    if i < len(OPTIONS):
+        votes_dict[label] = v
+    else:
+        other_vote = v  # the "Other" row
 
 # --- quadratic cost + metrics
-total_cost = sum(v*v for v in votes_dict.values()) + v_other*v_other
+total_cost = sum(v*v for v in votes_dict.values()) + other_vote*other_vote
 remaining = BUDGET - total_cost
 
-# populate the TOP metrics
 top_m1.metric("Total cost used", total_cost)
 top_m2.metric("Credits remaining", remaining)
 
-# also show BOTTOM metrics (duplicate)
+# bottom metrics (duplicate)
 bottom_m1, bottom_m2 = st.columns(2)
 bottom_m1.metric("Total cost used", total_cost)
 bottom_m2.metric("Credits remaining", remaining)
 
 # --- messages
-if invalid_rows:
-    st.error("Pick **only one** box per row.\n\nProblem rows: " + ", ".join(map(str, invalid_rows)))
 if total_cost > BUDGET:
     st.error("Over budget — uncheck something until you’re at 9 credits or less.")
 elif remaining > 0:
@@ -135,8 +141,8 @@ elif remaining > 0:
         "While you don't have to spend all your credits, it is encouraged."
     )
 
-# allow submit as long as rows are valid and not over budget
-disable_submit = bool(invalid_rows) or (total_cost > BUDGET)
+# allow submit as long as not over budget
+disable_submit = (total_cost > BUDGET)
 
 # --- submit -> Google Sheets ONLY
 if st.button("Submit", disabled=disable_submit, type="primary"):
@@ -145,7 +151,7 @@ if st.button("Submit", disabled=disable_submit, type="primary"):
         "total_cost": total_cost,
         **votes_dict,
         "Other (text)": proposed_name if include_other else "",
-        "Other (votes)": v_other,
+        "Other (votes)": other_vote,
     }
     save_vote_to_gsheet(row_out)
     st.success("Thanks! Your vote was recorded in Google Sheets.")
